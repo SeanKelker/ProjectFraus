@@ -34,7 +34,7 @@ AP_MAC_address = ''
 # Will generate graphs if set to true
 GENERATE_GRAPHS = False
 
-INFILE = 'try_2.pcapng'
+INFILE = 'Captures/ip.pcap'
 f = open(r'out.txt', 'w+')
 
 
@@ -43,7 +43,9 @@ class Packet:
 
     def __init__(self, pkt):
         try:
-            # TODO add frame type data and management
+
+            packet_layers = [layer.layer_name for layer in pkt.layers]
+
             # Record time when packet was sniffed
             self.time = int(pkt.sniff_time.timestamp() * 1000)
 
@@ -54,33 +56,62 @@ class Packet:
             # should not error because check had already been dont to see that these
             # layers exist. Should be changed if the protocols read become more fluid.
 
-            # MAC LAYER
-            wlan_radio = pkt['WLAN_RADIO']
-            self.data_rate = float(wlan_radio.data_rate)
-
+            # WLAN_RADIO
+            self.data_rate = None
             self.noise = None
-            if hasattr(wlan_radio, 'noise_dbm'):
-                self.noise = int(wlan_radio.noise_dbm)
-
             self.snr = None
-            if hasattr(wlan_radio, 'snr'):
-                self.snr = float(wlan_radio.snr)
-
-            mac_layer = pkt['WLAN']
-            self.src_mac_addr = mac_layer.ta
-            self.dst_mac_addr = mac_layer.ra
-
+            # MAC LAYER
+            self.src_mac_addr = None
+            self.dst_mac_addr = None
+            # WLAN
             self.duration = None
-            if hasattr(mac_layer, 'duration'):
-                self.duration = int(mac_layer.duration)
-
-            self.frame_type = mac_layer.fc_type
-            self.frame_subtype = mac_layer.fc_type_subtype
-            self.pwr_mgt = mac_layer.fc_pwrmgt
-
+            self.frame_type = None
+            self.frame_subtype = None
+            self.pwr_mgt = None
             self.access_category = None
-            if hasattr(mac_layer, 'qos_priority'):
-                self.access_category = int(mac_layer.qos_priority)
+
+            if 'wlan_radio' in packet_layers:
+                wlan_radio = pkt['WLAN_RADIO']
+                self.data_rate = float(wlan_radio.data_rate)
+
+                self.noise = None
+                if hasattr(wlan_radio, 'noise_dbm'):
+                    self.noise = int(wlan_radio.noise_dbm)
+
+                self.snr = None
+                if hasattr(wlan_radio, 'snr'):
+                    self.snr = float(wlan_radio.snr)
+            else:
+                self.data_rate = None
+                self.noise = None
+                self.snr = None
+
+            if 'wlan' in packet_layers:
+
+                mac_layer = pkt['WLAN']
+                self.src_mac_addr = mac_layer.ta
+                self.dst_mac_addr = mac_layer.ra
+
+                self.duration = None
+                if hasattr(mac_layer, 'duration'):
+                    self.duration = int(mac_layer.duration)
+
+                self.frame_type = mac_layer.fc_type
+                self.frame_subtype = mac_layer.fc_type_subtype
+
+                self.pwr_mgt = mac_layer.fc_pwrmgt
+
+                self.access_category = None
+                if hasattr(mac_layer, 'qos_priority'):
+                    self.access_category = int(mac_layer.qos_priority)
+
+            if 'eth' in packet_layers:
+                mac_layer = pkt['ETH']
+
+                self.src_mac_addr = mac_layer.src
+                self.dst_mac_addr = mac_layer.dst
+
+
 
         except AttributeError as e:
             # If we try and access a field that doesnt exist in the packet just
@@ -240,7 +271,6 @@ def visualize_packets(packets_timestamps, title=''):
     plt.plot(millisecond_bucket)
     plt.show()
 
-
 def create_subplot(subplot, packets, title='', color=None):
     subplot.set_title(title)
 
@@ -268,33 +298,33 @@ def create_subplot(subplot, packets, title='', color=None):
 def extract_layers(pkt):
     # Check that the layers we want exist in this packet
     packet_layers = [layer.layer_name for layer in pkt.layers]
-
-    if 'wlan' not in packet_layers:
+    if 'wlan' not in packet_layers and 'eth' not in packet_layers:
+        print('fuck')
         return
 
-    if not hasattr(pkt['WLAN'], 'ta'):
-        return
 
-    src_mac = pkt['WLAN'].ta
-    dst_mac = pkt['WLAN'].ra
+    pkt = Packet(pkt)
+
+    src_mac = pkt.src_mac_addr
+    dst_mac = pkt.dst_mac_addr
 
     # Devices are tracked by there mac address as a key in the devices dict
     # Add packets to to sending and receiving device
     if src_mac in _devices:
         source = _devices[src_mac]
-        source.add_sent_packet(Packet(pkt))
+        source.add_sent_packet(pkt)
     else:
         new_source = Device(src_mac)
         _devices[src_mac] = new_source
-        new_source.add_sent_packet(Packet(pkt))
+        new_source.add_sent_packet(pkt)
 
     if dst_mac in _devices:
         source = _devices[dst_mac]
-        source.add_recv_packet(Packet(pkt))
+        source.add_recv_packet(pkt)
     else:
         new_source = Device(dst_mac)
         _devices[dst_mac] = new_source
-        new_source.add_recv_packet(Packet(pkt))
+        new_source.add_recv_packet(pkt)
 
 
 # Given a list of packets extract lists of packets for each AC type
@@ -385,6 +415,8 @@ def main():
     capture = create_capture()
     start_time = time.time()
 
+    print(capture.load_packets(packet_count=100))
+
     for pkt in capture:
         extract_layers(pkt)
         if SNIFF_TIME is not None and time.time() - start_time > SNIFF_TIME:
@@ -397,7 +429,7 @@ def main():
             dev = _devices[mac]
             # All packets have been added to a sent and received so the sum of one
             # of the packets seen by the network
-            all_packets = all_packets + dev.sent
+            all_packets = all_packets + dev.senth66
 
         f.write('Aggregate Network Data:\n')
         process_packets(all_packets)
